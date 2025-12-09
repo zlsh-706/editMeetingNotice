@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>公文開會通知單產生器 (日曆選單版)</title>
+    
+    <!-- 字體：使用 Noto Serif TC 營造正式公文感 -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- 圖示庫 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- UI 框架 (Tailwind CSS) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF 與 截圖核心庫 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        /* --- 核心樣式設定 --- */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #374151; /* 深灰色背景 */
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+        }
+
+        /* 預覽區塊滾動條美化 */
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+
+        /* --- A4 紙張模擬 (關鍵 CSS) --- */
+        #preview-container {
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            overflow: auto;
+            padding: 40px;
+            background-color: #374151;
+            position: relative;
+        }
+
+        #a4-paper {
+            /* A4 尺寸：210mm x 297mm，在 96dpi 下約為 794px x 1123px */
+            width: 794px;
+            min-height: 1123px; /* 允許內容延伸，但保持 A4 比例 */
+            background-color: white;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            padding: 50px 60px; 
+            position: relative;
+            color: #1f2937;
+            transform-origin: top center;
+            display: flex;
+            flex-direction: column;
+            /* 修正：讓內容自然流動，避免元素重疊 */
+            justify-content: flex-start; 
+        }
+
+        /* 公文內容樣式 */
+        .doc-header {
+            text-align: center;
+            font-family: 'Noto Serif TC', serif;
+            margin-bottom: 5px;
+        }
+        
+        .school-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #4b5563;
+            margin-bottom: 6px;
+        }
+
+        .main-title {
+            font-size: 36px;
+            font-weight: 700;
+            letter-spacing: 8px;
+            color: #000;
+            margin: 0;
+            line-height: 1.2;
+        }
+
+        .red-divider {
+            height: 4px;
+            background-color: #b91c1c; /* 公文紅 */
+            margin: 15px 0 20px 0;
+            width: 100%;
+        }
+
+        /* 內容區塊 */
+        .content-section {
+            background-color: #ffffff;
+            border: none;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            margin-bottom: 25px;
+        }
+
+        .row-item {
+            display: flex;
+            gap: 15px;
+            align-items: flex-start;
+        }
+
+        .row-icon {
+            color: #b91c1c;
+            width: 28px;
+            text-align: center;
+            padding-top: 2px;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .row-content {
+            flex-grow: 1;
+        }
+
+        .field-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 700;
+            color: #4b5563;
+            margin-bottom: 2px;
+            text-transform: uppercase;
+        }
+
+        .field-value {
+            font-size: 18px;
+            font-weight: 500;
+            color: #111827;
+            white-space: pre-wrap;
+            line-height: 1.5;
+            text-align: justify;
+        }
+
+        .field-value.highlight {
+            font-weight: 700;
+            font-size: 20px;
+            color: #000;
+        }
+
+        /* 底部名單區 */
+        .footer-block {
+            border-top: 2px dashed #e5e7eb;
+            padding-top: 15px;
+            margin-top: 10px;
+        }
+
+        .footer-label {
+            font-size: 15px;
+            font-weight: 700;
+            color: #374151;
+            margin-bottom: 6px;
+        }
+
+        .footer-text {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #1f2937;
+            text-align: justify;
+        }
+
+        /* --- 底部圖片區 (QR Code & 圓戳章) --- */
+        .bottom-extras {
+            /* 修正關鍵：移除 margin-top: auto，改為固定間距，避免與上方文字重疊 */
+            margin-top: 40px; 
+            padding-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            min-height: 100px;
+            /* 確保在列印時不會被切斷 */
+            page-break-inside: avoid;
+        }
+
+        .qr-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center; /* 讓文字與 QR Code 置中對齊 */
+            gap: 8px;
+        }
+
+        .qr-image {
+            width: 100px;
+            height: 100px;
+            object-fit: contain;
+            display: none;
+            border: 1px solid #eee;
+            background: white; /* 確保背景不透明 */
+        }
+
+        .qr-label {
+            font-size: 12px;
+            color: #6b7280;
+            font-weight: 500;
+            display: none;
+        }
+
+        .stamp-container {
+            position: relative;
+            padding-right: 20px;
+        }
+
+        .stamp-image {
+            width: 140px;
+            height: 140px;
+            object-fit: contain;
+            display: none;
+            opacity: 0.85;
+            transform: rotate(-10deg);
+        }
+
+        /* 輸入框樣式 */
+        .editor-input {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .editor-input:focus {
+            border-color: #2563eb;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+        }
+        .editor-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #4b5563;
+            margin-bottom: 4px;
+            display: block;
+        }
+        
+        .file-upload-btn {
+            display: block;
+            width: 100%;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .file-upload-btn::-webkit-file-upload-button {
+            background-color: white;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 4px 8px;
+            margin-right: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .file-upload-btn::-webkit-file-upload-button:hover {
+            background-color: #f3f4f6;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 左側：編輯與控制面板 -->
+    <div class="w-[400px] bg-white h-full flex flex-col shadow-2xl z-10 shrink-0">
+        <!-- 標題區 -->
+        <div class="p-5 border-b bg-gray-50">
+            <h2 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <i class="fa-solid fa-pen-to-square text-blue-600"></i>
+                開會通知編輯器
+            </h2>
+            <p class="text-sm text-gray-500 mt-1">日曆選單 • CSV 匯入 • PDF 輸出</p>
+        </div>
+
+        <!-- 滾動編輯區 -->
+        <div class="flex-grow overflow-y-auto p-5 space-y-6 custom-scrollbar">
+            
+            <!-- CSV 工具區 -->
+            <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-sm font-bold text-emerald-800 flex items-center gap-2">
+                        <i class="fa-solid fa-file-csv"></i> 名單快速置換
+                    </h3>
+                    <button onclick="downloadCSVTemplate()" class="text-xs bg-white border border-emerald-300 text-emerald-700 px-3 py-1 rounded hover:bg-emerald-100 transition shadow-sm">
+                        <i class="fa-solid fa-download"></i> 下載範本
+                    </button>
+                </div>
+                
+                <input type="file" id="csvFile" accept=".csv" class="file-upload-btn"/>
+                <p class="text-[11px] text-emerald-600 mt-2">
+                    * 支援：主持人、聯絡人、出席者、列席者、備註
+                </p>
+            </div>
+
+            <!-- 基本資訊 -->
+            <div class="space-y-3">
+                <h3 class="text-xs font-bold text-gray-400 uppercase border-b pb-1 tracking-wider">發文資訊</h3>
+                
+                <div>
+                    <label class="editor-label">發文單位 (學校/機關)</label>
+                    <input type="text" id="inSchool" class="editor-input" value="臺北市立中崙高級中學">
+                </div>
+            </div>
+
+            <!-- 會議細節 -->
+            <div class="space-y-3">
+                <h3 class="text-xs font-bold text-gray-400 uppercase border-b pb-1 tracking-wider">會議內容</h3>
+                
+                <div>
+                    <label class="editor-label">開會事由</label>
+                    <textarea id="inSubject" rows="3" class="editor-input" placeholder="請輸入開會事由..."></textarea>
+                </div>
+
+                <div>
+                    <label class="editor-label">開會時間 (日曆選取)</label>
+                    <!-- 修改：使用 datetime-local 實現日曆選取 -->
+                    <input type="datetime-local" id="inTime" class="editor-input">
+                </div>
+
+                <div>
+                    <label class="editor-label">開會地點</label>
+                    <input type="text" id="inLocation" class="editor-input" value="" placeholder="請輸入開會地點...">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="editor-label text-emerald-700">主持人 (CSV)</label>
+                        <input type="text" id="inHost" class="editor-input" value="" placeholder="主持人姓名">
+                    </div>
+                    <div>
+                        <label class="editor-label text-emerald-700">聯絡人及電話 (CSV)</label>
+                        <input type="text" id="inContact" class="editor-input" value="" placeholder="聯絡人資訊">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 人員名單 -->
+            <div class="space-y-3">
+                <h3 class="text-xs font-bold text-gray-400 uppercase border-b pb-1 tracking-wider">人員名單</h3>
+                
+                <div>
+                    <label class="editor-label text-emerald-700">出席者 (CSV) - 可容納多行</label>
+                    <textarea id="inAttendees" rows="10" class="editor-input" placeholder="請輸入出席者名單..."></textarea>
+                </div>
+
+                <div>
+                    <label class="editor-label text-emerald-700">列席者 (CSV)</label>
+                    <textarea id="inNonVoting" rows="2" class="editor-input" placeholder="(選填，若無則不顯示)"></textarea>
+                </div>
+
+                <div>
+                    <label class="editor-label text-emerald-700">備註 (CSV)</label>
+                    <textarea id="inNotes" rows="2" class="editor-input" placeholder="(選填，例如：請自備環保杯)"></textarea>
+                </div>
+            </div>
+
+            <!-- 圖片上傳區 -->
+            <div class="space-y-3">
+                <h3 class="text-xs font-bold text-gray-400 uppercase border-b pb-1 tracking-wider">附加圖片</h3>
+                
+                <div>
+                    <label class="editor-label flex justify-between">
+                        QR Code 圖像
+                        <button onclick="clearImage('qr')" class="text-[10px] text-red-500 hover:underline">清除</button>
+                    </label>
+                    <input type="file" id="inQRFile" accept="image/*" class="file-upload-btn"/>
+                </div>
+
+                <div>
+                    <label class="editor-label flex justify-between">
+                        單位圓戳章 (建議 PNG 去背)
+                        <button onclick="clearImage('stamp')" class="text-[10px] text-red-500 hover:underline">清除</button>
+                    </label>
+                    <input type="file" id="inStampFile" accept="image/*" class="file-upload-btn"/>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部按鈕區 -->
+        <div class="p-4 border-t bg-gray-100 space-y-3">
+            <button onclick="generatePDF()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded shadow flex items-center justify-center gap-2 transition">
+                <i class="fa-solid fa-file-pdf"></i> 下載 PDF 文件
+            </button>
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="generateImage()" class="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded shadow-sm flex items-center justify-center gap-2 transition text-sm">
+                    <i class="fa-solid fa-image"></i> 下載圖片
+                </button>
+                <button onclick="saveProject()" class="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold py-2 px-4 rounded shadow-sm flex items-center justify-center gap-2 transition text-sm">
+                    <i class="fa-solid fa-floppy-disk"></i> 儲存專案 HTML
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右側：A4 預覽區 -->
+    <div id="preview-container" class="custom-scrollbar">
+        <!-- 這是實際被列印/轉檔的 A4 節點 -->
+        <div id="a4-paper">
+            
+            <!-- 頁首 -->
+            <div class="doc-header">
+                <div class="school-title" id="outSchool">臺北市立中崙高級中學</div>
+                <h1 class="main-title">開會通知單</h1>
+            </div>
+            
+            <div class="red-divider"></div>
+
+            <!-- 主要內容框 -->
+            <div class="content-section">
+                <!-- 事由 -->
+                <div class="row-item">
+                    <div class="row-icon"><i class="fa-solid fa-bullhorn"></i></div>
+                    <div class="row-content">
+                        <span class="field-label">開會事由</span>
+                        <div class="field-value highlight" id="outSubject"></div>
+                    </div>
+                </div>
+
+                <!-- 時間 -->
+                <div class="row-item">
+                    <div class="row-icon"><i class="fa-regular fa-clock"></i></div>
+                    <div class="row-content">
+                        <span class="field-label">開會時間</span>
+                        <!-- 預設顯示會透過 JS 更新 -->
+                        <div class="field-value" id="outTime"></div>
+                    </div>
+                </div>
+
+                <!-- 地點 -->
+                <div class="row-item">
+                    <div class="row-icon"><i class="fa-solid fa-location-dot"></i></div>
+                    <div class="row-content">
+                        <span class="field-label">開會地點</span>
+                        <div class="field-value" id="outLocation"></div>
+                    </div>
+                </div>
+
+                <!-- 主持人 -->
+                <div class="row-item">
+                    <div class="row-icon"><i class="fa-solid fa-user-tie"></i></div>
+                    <div class="row-content">
+                        <span class="field-label">主持人</span>
+                        <div class="field-value" id="outHost"></div>
+                    </div>
+                </div>
+
+                <!-- 聯絡人 -->
+                <div class="row-item">
+                    <div class="row-icon"><i class="fa-solid fa-phone"></i></div>
+                    <div class="row-content">
+                        <span class="field-label">聯絡人及電話</span>
+                        <div class="field-value" id="outContact"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部名單區 -->
+            <div class="footer-block">
+                <div class="footer-label">出席者：</div>
+                <div class="footer-text" id="outAttendees"></div>
+            </div>
+
+            <div class="footer-block" id="blockNonVoting" style="display: none;">
+                <div class="footer-label">列席者：</div>
+                <div class="footer-text" id="outNonVoting"></div>
+            </div>
+
+            <div class="footer-block" id="blockNotes" style="display: none;">
+                <div class="footer-label">備註：</div>
+                <div class="footer-text" id="outNotes"></div>
+            </div>
+
+            <!-- 底部圖片區 (QR & Stamp) -->
+            <div class="bottom-extras">
+                <!-- QR Code 區 (左側) -->
+                <div class="qr-container">
+                    <img id="outQRImage" class="qr-image" src="" alt="QR Code">
+                    <span id="qrText" class="qr-label">掃描 QR Code</span>
+                </div>
+
+                <!-- 圓戳章區 (右側) -->
+                <div class="stamp-container">
+                    <img id="outStampImage" class="stamp-image" src="" alt="Official Stamp">
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 腳本邏輯 -->
+    <script>
+        // ----------------------------------------------------
+        // 1. 初始化與縮放控制
+        // ----------------------------------------------------
+        window.addEventListener('load', () => {
+            adjustScale();
+            initDateTime(); // 初始化時間
+            window.addEventListener('resize', adjustScale);
+        });
+
+        function adjustScale() {
+            const previewContainer = document.getElementById('preview-container');
+            const paper = document.getElementById('a4-paper');
+            const margin = 40;
+            
+            // 計算適合的縮放比例
+            const availableWidth = previewContainer.clientWidth - (margin * 2);
+            const scale = Math.min(availableWidth / 794, 1); 
+            
+            paper.style.transform = `scale(${scale})`;
+            // 修正高度
+            paper.style.marginBottom = `-${(1 - scale) * 1123}px`;
+        }
+
+        // 初始化日期選單
+        function initDateTime() {
+            const timeInput = document.getElementById('inTime');
+            const now = new Date();
+            // 調整時區以符合 ISO 格式 (解決 toISOString 轉 UTC 問題)
+            const localIso = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+            timeInput.value = localIso;
+            
+            // 立即更新顯示
+            updateTimeDisplay(timeInput.value);
+
+            // 監聽變更
+            timeInput.addEventListener('input', (e) => {
+                updateTimeDisplay(e.target.value);
+            });
+        }
+
+        function updateTimeDisplay(val) {
+            if (!val) return;
+            const d = new Date(val);
+            if (isNaN(d)) return;
+
+            const rocYear = d.getFullYear() - 1911;
+            const month = d.getMonth() + 1;
+            const day = d.getDate();
+            const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+            const week = weekdays[d.getDay()];
+            const hour = d.getHours();
+            const minute = d.getMinutes();
+            
+            const period = hour < 12 ? '上午' : '下午';
+            const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+            
+            // 格式：中華民國114年12月9日(星期二) 下午3時57分
+            const formatted = `中華民國${rocYear}年${month}月${day}日(星期${week}) ${period}${displayHour}時${minute > 0 ? String(minute).padStart(2,'0') + '分' : ''}`;
+            
+            document.getElementById('outTime').innerText = formatted;
+        }
+
+        // ----------------------------------------------------
+        // 2. 資料綁定 (輸入框 -> 預覽)
+        // ----------------------------------------------------
+        const dataMap = [
+            { input: 'inSchool', output: 'outSchool' },
+            { input: 'inSubject', output: 'outSubject' },
+            // inTime 已經由 initDateTime 單獨處理
+            { input: 'inLocation', output: 'outLocation' },
+            { input: 'inHost', output: 'outHost' },
+            { input: 'inContact', output: 'outContact' },
+            { input: 'inAttendees', output: 'outAttendees' },
+            { input: 'inNonVoting', output: 'outNonVoting', block: 'blockNonVoting' },
+            { input: 'inNotes', output: 'outNotes', block: 'blockNotes' }
+        ];
+
+        dataMap.forEach(item => {
+            const inEl = document.getElementById(item.input);
+            const outEl = document.getElementById(item.output);
+            
+            if (inEl && outEl) {
+                // 初始檢查顯示狀態
+                if (item.block) checkVisibility(inEl.value, item.block);
+
+                inEl.addEventListener('input', (e) => {
+                    outEl.innerText = e.target.value;
+                    if (item.block) checkVisibility(e.target.value, item.block);
+                });
+            }
+        });
+
+        function checkVisibility(value, blockId) {
+            const block = document.getElementById(blockId);
+            if (block) {
+                block.style.display = value && value.trim() !== '' ? 'block' : 'none';
+            }
+        }
+
+        // ----------------------------------------------------
+        // 3. 圖片上傳邏輯 (QR Code & Stamp)
+        // ----------------------------------------------------
+        function setupImageUpload(inputId, imgId, labelId = null) {
+            document.getElementById(inputId).addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const img = document.getElementById(imgId);
+                        img.src = e.target.result;
+                        img.style.display = 'block';
+                        if (labelId) document.getElementById(labelId).style.display = 'block';
+                    }
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
+
+        setupImageUpload('inQRFile', 'outQRImage', 'qrText');
+        setupImageUpload('inStampFile', 'outStampImage');
+
+        function clearImage(type) {
+            if (type === 'qr') {
+                document.getElementById('inQRFile').value = '';
+                document.getElementById('outQRImage').style.display = 'none';
+                document.getElementById('outQRImage').src = '';
+                document.getElementById('qrText').style.display = 'none';
+            } else if (type === 'stamp') {
+                document.getElementById('inStampFile').value = '';
+                document.getElementById('outStampImage').style.display = 'none';
+                document.getElementById('outStampImage').src = '';
+            }
+        }
+
+        // ----------------------------------------------------
+        // 4. CSV 處理邏輯
+        // ----------------------------------------------------
+        
+        function downloadCSVTemplate() {
+            const BOM = "\uFEFF"; 
+            const headers = ["主持人", "聯絡人及電話", "出席者", "列席者", "備註"];
+            const example = [
+                "王大明校長", 
+                "李秘書 02-12345678", 
+                "各處室主任、組長、王老師、李老師、張老師、陳老師", 
+                "家長會長", 
+                "請準時出席，並自備環保杯"
+            ];
+            
+            const rowToCSV = row => row.map(val => `"${val}"`).join(",");
+            const csvContent = BOM + rowToCSV(headers) + "\n" + rowToCSV(example);
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "開會通知名單範本.csv";
+            link.click();
+        }
+
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                parseAndFillCSV(text);
+            };
+            reader.readAsText(file);
+            this.value = '';
+        });
+
+        function parseAndFillCSV(text) {
+            const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
+            if (lines.length < 2) {
+                alert("錯誤：CSV 檔案內容似乎為空，或僅有標題列。");
+                return;
+            }
+
+            const parseLine = (line) => {
+                const result = [];
+                let current = '';
+                let inQuotes = false;
+                
+                for (let i = 0; i < line.length; i++) {
+                    const char = line[i];
+                    if (char === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (char === ',' && !inQuotes) {
+                        result.push(current.trim().replace(/^"|"$/g, ''));
+                        current = '';
+                    } else {
+                        current += char;
+                    }
+                }
+                result.push(current.trim().replace(/^"|"$/g, ''));
+                return result;
+            };
+
+            const headers = parseLine(lines[0]);
+            const data = parseLine(lines[1]); 
+
+            const map = {
+                "主持人": "inHost",
+                "聯絡人及電話": "inContact",
+                "出席者": "inAttendees",
+                "列席者": "inNonVoting",
+                "備註": "inNotes"
+            };
+
+            let count = 0;
+            headers.forEach((h, idx) => {
+                const key = h.replace(/^"|"$/g, '').trim(); 
+                const inputId = map[key];
+                if (inputId && data[idx] !== undefined) {
+                    const el = document.getElementById(inputId);
+                    el.value = data[idx];
+                    el.dispatchEvent(new Event('input')); 
+                    count++;
+                }
+            });
+
+            if (count > 0) {
+                alert(`匯入成功！已更新 ${count} 個欄位資料。`);
+            } else {
+                alert("匯入失敗：找不到對應的標題欄位，請確認是否使用正確範本。");
+            }
+        }
+
+        // ----------------------------------------------------
+        // 5. 輸出功能
+        // ----------------------------------------------------
+        window.jsPDF = window.jspdf.jsPDF;
+
+        function generatePDF() {
+            const element = document.getElementById('a4-paper');
+            const originalShadow = element.style.boxShadow;
+            const originalTransform = element.style.transform;
+            element.style.boxShadow = 'none';
+            element.style.transform = 'scale(1)'; 
+
+            html2canvas(element, { 
+                scale: 2, 
+                useCORS: true,
+                logging: false
+            }).then(canvas => {
+                const imgData = canvas.toDataURL('image/jpeg', 1.0);
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = pdf.internal.pageSize.getHeight();
+                
+                pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                pdf.save("meeting_notice.pdf");
+
+                element.style.boxShadow = originalShadow;
+                element.style.transform = originalTransform;
+                adjustScale(); 
+            });
+        }
+
+        function generateImage() {
+            const element = document.getElementById('a4-paper');
+            const originalShadow = element.style.boxShadow;
+            const originalTransform = element.style.transform;
+            element.style.boxShadow = 'none';
+            element.style.transform = 'scale(1)';
+
+            html2canvas(element, { scale: 2 }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'meeting_notice.jpg';
+                link.href = canvas.toDataURL('image/jpeg', 0.9);
+                link.click();
+                
+                element.style.boxShadow = originalShadow;
+                element.style.transform = originalTransform;
+                adjustScale();
+            });
+        }
+
+        function saveProject() {
+            const htmlContent = `<!DOCTYPE html>${document.documentElement.outerHTML}`;
+            const blob = new Blob([htmlContent], {type: 'text/html'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'meeting_notice_project.html';
+            link.click();
+        }
+    </script>
+</body>
+</html>
